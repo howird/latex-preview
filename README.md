@@ -4,7 +4,8 @@ Live LaTeX PDF preview in your browser: updates on save, and clicks jump between
 your editor.
 
 Your PDF opens in a browser tab and reloads whenever you rebuild. Double-click the PDF to jump
-to that sentence in your editor, or press a key in your editor to scroll the PDF there. It works
+to that line in your editor, or press a key in your editor to scroll the PDF there and highlight
+the word under your cursor. Either way the PDF highlights the text of that source line. It works
 over SSH: write on a remote machine and read on your laptop.
 
 ## Use it in a paper
@@ -38,7 +39,7 @@ Or without a flake: `nix run github:howird/latex-preview -- serve out/main.pdf`.
 | Program | What it does |
 | --- | --- |
 | `latex-preview serve PDF` | PDF.js preview with SyncTeX in both directions |
-| `latex-preview forward FILE LINE [COL]` | Scroll the running preview to a source line |
+| `latex-preview forward FILE LINE [COL]` | Scroll the running preview to a source line, and highlight the word at `COL` |
 | `latex-build FILE` | `tectonic -X compile FILE --synctex --keep-logs --outdir out` |
 | `latex-watch FILE` | `latex-build` on every source change, for editors that don't build on save |
 
@@ -78,8 +79,8 @@ changes.
 
 | Endpoint | Direction |
 | --- | --- |
-| `GET /forward?file=F&line=N` | editor → PDF: scroll the viewer to `F:N` and highlight it |
-| `POST /inverse {page,x,y}` | PDF → editor: open the source line via `texlab inverse-search` |
+| `GET /forward?file=F&line=N[&col=C]` | editor → PDF: scroll the viewer to `F:N` and highlight it, and the word at column `C` |
+| `POST /inverse {page,x,y}` | PDF → editor: open the source line via `texlab inverse-search`, and return its boxes to highlight |
 | `GET /events` | Server-sent events: `reload` and `forward` |
 
 ### Which texlab gets the jump
@@ -99,6 +100,19 @@ from the devShell and the two match.
 `synctex edit` usually answers with the line where a paragraph *ended*, not the line under
 the click. `refine_line` forward-searches every line of that paragraph and picks the one with
 a position on the clicked row, just left of the click.
+
+### Forward search finds the word
+
+SyncTeX ignores the column, and answers with whole output lines: every one the source line
+touches, including the text of the source lines before and after it. The server lists the words
+on those output lines with `pdftotext -bbox` and aligns them with the source line's words. That
+finds where the source line's own text starts and ends, which the viewer highlights, and, given
+a column, which occurrence of the word under the cursor it is, which the viewer highlights more
+strongly. Where the alignment finds nothing (math, tables, a float SyncTeX reports as one box),
+the whole output lines are highlighted.
+
+Inverse search stays at line level: `texlab inverse-search` drops the column before it reaches
+the editor.
 
 ### End every `\input` file with a blank line and `\par`
 
@@ -123,4 +137,4 @@ From a paper repo, point at a local checkout with
 `use flake . --override-input latex-preview path:../latex-preview` in `.envrc`. After a change,
 `direnv reload` and restart `latex-preview serve`. To skip the rebuild,
 `python3 src/latex_preview.py serve PDF` runs the checkout directly; `synctex` must be on
-`PATH`.
+`PATH`, and `pdftotext` for word-level forward search.

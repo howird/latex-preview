@@ -15,14 +15,15 @@
     in rec {
       default = latex-preview;
 
-      # The server and viewer. texlab goes last on PATH so the editor's texlab wins.
+      # The server and viewer; pdftotext finds words for forward search. texlab goes last on
+      # PATH so the editor's texlab wins.
       latex-preview = pkgs.runCommand "latex-preview" {nativeBuildInputs = [pkgs.makeWrapper];} ''
         mkdir -p $out/share/latex-preview $out/bin
         cp ${./src/latex_preview.py} $out/share/latex-preview/latex_preview.py
         cp ${./src/index.html} $out/share/latex-preview/index.html
         makeWrapper ${pkgs.python3}/bin/python3 $out/bin/latex-preview \
           --add-flags $out/share/latex-preview/latex_preview.py \
-          --prefix PATH : ${pkgs.lib.makeBinPath [synctex]} \
+          --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils]} \
           --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.texlab]}
       '';
 

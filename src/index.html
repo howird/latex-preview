@@ -21,6 +21,8 @@
     position: absolute; pointer-events: none; border-radius: 2px;
     background: #ffd60055; outline: 2px solid #f5a300; transition: opacity 1s;
   }
+  /* With a word to point at, its line is only context. */
+  .hl.line { background: #ffd60033; outline: 0; }
   /* Ripple at a double-click: green once helix has the jump, red if it did not. */
   .ripple {
     position: absolute; pointer-events: none; width: 16px; height: 16px; margin: -8px 0 0 -8px;
@@ -134,14 +136,16 @@ async function load() {
   }
 }
 
-function forward(boxes) {
+// Highlight a source line's boxes, and its word if there is one; scroll there unless the user is
+// already looking (they just double-clicked it).
+function highlight(boxes, words = [], scroll = true) {
   document.querySelectorAll(".hl").forEach((el) => el.remove());
   let firstEl = null;
-  for (const b of boxes) {
+  const draw = (b, cls) => {
     const pageEl = container.querySelector(`.page[data-page="${b.page}"]`);
-    if (!pageEl) continue;
+    if (!pageEl) return;
     const hl = document.createElement("div");
-    hl.className = "hl";
+    hl.className = cls;
     Object.assign(hl.style, {
       left: `${b.h * scale}px`, top: `${(b.v - b.H) * scale}px`,
       width: `${Math.max(b.W, 4) * scale}px`, height: `${Math.max(b.H, 4) * scale}px`,
@@ -150,8 +154,10 @@ function forward(boxes) {
     firstEl ??= hl;
     setTimeout(() => { hl.style.opacity = 0; }, 1500);
     setTimeout(() => hl.remove(), 2600);
-  }
-  firstEl?.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  words.forEach((b) => draw(b, "hl"));
+  boxes.forEach((b) => draw(b, words.length ? "hl line" : "hl"));
+  if (scroll) firstEl?.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 container.addEventListener("dblclick", async (e) => {
@@ -167,9 +173,10 @@ container.addEventListener("dblclick", async (e) => {
   let ok = false;
   try {
     const res = await fetch("/inverse", { method: "POST", body: JSON.stringify(body) });
-    const text = await res.text();
+    const { msg, boxes } = await res.json();
     ok = res.ok;
-    say(ok ? `→ ${text.split("/").slice(-2).join("/")}` : text);
+    say(ok ? `→ ${msg.split("/").slice(-2).join("/")}` : msg);
+    highlight(boxes, [], false);
   } catch (err) {
     say(`Could not reach preview server: ${err.message}`);
   }
@@ -248,7 +255,7 @@ const events = new EventSource("/events");
 events.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === "reload") load();
-  else if (msg.type === "forward") forward(msg.boxes);
+  else if (msg.type === "forward") highlight(msg.boxes, msg.words);
 };
 // The server restarted or the tunnel dropped: the PDF may have changed meanwhile.
 events.onopen = () => { if (doc) load(); };
