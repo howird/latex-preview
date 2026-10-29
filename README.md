@@ -3,10 +3,10 @@
 Live LaTeX PDF preview in your browser: updates on save, and clicks jump between the PDF and
 your editor.
 
-Your PDF opens in a browser tab and reloads whenever you rebuild. Double-click the PDF to jump
-to that line in your editor, or press a key in your editor to scroll the PDF there and highlight
-the word under your cursor. Either way the PDF highlights the text of that source line. It works
-over SSH: write on a remote machine and read on your laptop.
+Your PDF opens in a browser tab and reloads whenever you rebuild. Helix starts the preview as a
+language server. Double-click the PDF to jump to that line in Helix, or press a key in Helix to
+scroll the PDF there and highlight the word under your cursor. Either way the PDF highlights the
+text of that source line. It works over SSH: write on a remote machine and read on your laptop.
 
 ## Use it in a paper
 
@@ -27,38 +27,26 @@ over SSH: write on a remote machine and read on your laptop.
 ```
 
 With `use flake` in `.envrc`, the shell has tectonic, texlab, tex-fmt, chktex, just, watchexec
-and the three tools below.
-
-```sh
-latex-build main.tex             # compile to out/main.pdf with SyncTeX data
-latex-preview serve out/main.pdf # prints the ssh tunnel and the URL to open
-```
-
-Or without a flake: `nix run github:howird/latex-preview -- serve out/main.pdf`.
+and the three programs below.
 
 | Program | What it does |
 | --- | --- |
-| `latex-preview serve PDF` | PDF.js preview with SyncTeX in both directions |
-| `latex-preview forward FILE LINE [COL]` | Scroll the running preview to a source line, and highlight the word at `COL` |
-| `latex-build FILE` | `tectonic -X compile FILE --synctex --keep-logs --outdir out` |
+| `latex-preview` | The preview, as a language server Helix starts for `.tex` files |
+| `latex-build FILE` | `tectonic -X compile FILE --synctex --keep-logs --keep-intermediates --outdir out` |
 | `latex-watch FILE` | `latex-build` on every source change, for editors that don't build on save |
-
-### Port
-
-`serve` uses `--port`, else `$LATEX_PREVIEW_PORT`, else a free port. It writes the port to
-`.latex-preview-port` next to the PDF. `forward` finds it by looking in each directory above
-the source file, and its `out/`, so several papers can be previewed at once.
 
 ## Helix
 
 ```toml
-# .helix/config.toml: space v scrolls the preview to the cursor
-[keys.normal.space]
-v = ":sh latex-preview forward %{buffer_name} %{cursor_line} %{cursor_column}"
-```
+# .helix/languages.toml
+[[language]]
+name = "latex"
+language-servers = ["texlab", "latex-preview"]
 
-```toml
-# .helix/languages.toml: texlab builds on save, and the preview reloads
+[language-server.latex-preview]
+command = "latex-preview"
+
+# texlab builds on save into out/, and the preview reloads.
 [language-server.texlab.config.texlab]
 auxDirectory = "out"
 
@@ -69,31 +57,67 @@ executable = "latex-build"
 args = ["%f"]
 ```
 
-Double-clicking the PDF runs `texlab inverse-search`, which works with any editor running
-texlab as its language server.
+```toml
+# .helix/config.toml: space v scrolls the preview to the cursor
+[keys.normal.space]
+v = ["hover", ":lsp-workspace-command latex.showInPreview"]
+```
+
+Hover is how the cursor position reaches the preview: Helix sends it to both servers, and the
+preview answers with nothing, so the page you see is texlab's. Double-clicking the PDF opens that
+line in the Helix that started the preview.
+
+Helix runs the rest of a key's commands when one fails, so one binding can drive several
+previews. With argdown-preview:
+
+```toml
+v = ["hover", ":lsp-workspace-command latex.showInPreview", ":lsp-workspace-command argdown.showInPreview"]
+```
+
+### Port
+
+The preview listens on `127.0.0.1` and a free port. Helix shows the URL, with the `ssh -NL` line to
+run on your laptop, when the server starts; `:lsp-workspace-command latex.previewUrl` shows it
+again. A fixed port saves the lookup and keeps the tunnel and the browser tab working across
+restarts. Set it in `languages.toml`:
+
+```toml
+[language-server.latex-preview.config.preview]
+port = 23636
+host = "127.0.0.1"
+```
+
+or with `$LATEX_PREVIEW_PORT` and `$LATEX_PREVIEW_HOST`, say in the paper's `.envrc`; these
+override `languages.toml`. If the port is taken, Helix shows an error and there is no preview
+until you restart the server on a free one.
+
+## What it shows
+
+The preview shows the PDF of one document, a `.tex` file with `\documentclass`, from
+`out/NAME.pdf` next to it, and reloads whenever it is rebuilt. It finds the document a file
+belongs to as texlab does: it reads every `.tex` file in the workspace and follows `\input`,
+`\include`, `\subfile`, `\import` and `\subimport` from each document. Opening or hovering a
+file the current document includes keeps it up. A file only another document includes switches
+to it; among several, it prefers `main.tex`, then the nearest. To always show one, set its path,
+relative to the workspace:
+
+```toml
+[language-server.latex-preview.config.preview]
+root = "main.tex"
+```
 
 ## How it works
 
-`src/latex_preview.py` serves `src/index.html`, a PDF.js viewer that reloads whenever the PDF
-changes.
+`src/latex_preview.py` runs `src/lsp.py`, a stdio language server. It finds documents with
+`src/project.py`, and serves `src/index.html`, a PDF.js viewer, from `src/preview.py`.
+`src/locate.py` maps between source lines and the PDF with SyncTeX.
 
 | Endpoint | Direction |
 | --- | --- |
-| `GET /forward?file=F&line=N[&col=C]` | editor → PDF: scroll the viewer to `F:N` and highlight it, and the word at column `C` |
-| `POST /inverse {page,x,y}` | PDF → editor: open the source line via `texlab inverse-search`, and return its boxes to highlight |
-| `GET /events` | Server-sent events: `reload` and `forward` |
+| `POST /inverse {page,x,y}` | PDF → editor: the server sends `window/showDocument` to Helix, and returns the line's boxes to highlight |
+| `GET /events` | Server-sent events: `reload`, `forward` (boxes to highlight) and `say` (a status message) |
 
-### Which texlab gets the jump
-
-`texlab inverse-search` sends the jump to whichever texlab owns
-`$XDG_RUNTIME_DIR/texlab.sock`, which is the one that started last. The server warns at
-startup, and again when a jump fails, if:
-
-- more than one texlab is running (clicks may land in the wrong editor), or
-- your editor's texlab is a different build from the one on the server's `PATH`.
-
-The wrapper puts texlab *last* on `PATH`, so the texlab from your shell wins. Open your editor
-from the devShell and the two match.
+Forward search is `latex.showInPreview`: it looks up the position of the last hover.
 
 ### Inverse search lands on the right line
 
@@ -111,8 +135,7 @@ a column, which occurrence of the word under the cursor it is, which the viewer 
 strongly. Where the alignment finds nothing (math, tables, a float SyncTeX reports as one box),
 the whole output lines are highlighted.
 
-Inverse search stays at line level: `texlab inverse-search` drops the column before it reaches
-the editor.
+Inverse search stays at line level: SyncTeX answers a click with a line, not a column.
 
 ### End every `\input` file with a blank line and `\par`
 
@@ -133,8 +156,11 @@ is ever deleted. It has no effect on the output.
 
 ## Developing
 
+`nix develop .#develop` has python with pytest, tectonic, synctex, pdftotext and just; `just test`
+runs the tests against `src/`, and `just check` the nix build and its tests.
+
 From a paper repo, point at a local checkout with
 `use flake . --override-input latex-preview path:../latex-preview` in `.envrc`. After a change,
-`direnv reload` and restart `latex-preview serve`. To skip the rebuild,
-`python3 src/latex_preview.py serve PDF` runs the checkout directly; `synctex` must be on
-`PATH`, and `pdftotext` for word-level forward search.
+`direnv reload` and `:lsp-restart` in Helix. To skip the rebuild, set `command = "python3"` and
+`args = ["../latex-preview/src/latex_preview.py"]` for `latex-preview` in
+`.helix/languages.toml`; `synctex` and `pdftotext` must be on `PATH`.

@@ -1,5 +1,5 @@
 {
-  description = "Live LaTeX PDF preview in your browser: updates on save, and clicks jump between the PDF and your editor";
+  description = "Live LaTeX PDF preview in your browser, as a language server: updates on save, and clicks jump between the PDF and your editor";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -15,16 +15,13 @@
     in rec {
       default = latex-preview;
 
-      # The server and viewer; pdftotext finds words for forward search. texlab goes last on
-      # PATH so the editor's texlab wins.
+      # The language server, which serves the viewer; pdftotext finds words for forward search.
       latex-preview = pkgs.runCommand "latex-preview" {nativeBuildInputs = [pkgs.makeWrapper];} ''
         mkdir -p $out/share/latex-preview $out/bin
-        cp ${./src/latex_preview.py} $out/share/latex-preview/latex_preview.py
-        cp ${./src/index.html} $out/share/latex-preview/index.html
+        cp ${./src}/*.py ${./src/index.html} $out/share/latex-preview/
         makeWrapper ${pkgs.python3}/bin/python3 $out/bin/latex-preview \
           --add-flags $out/share/latex-preview/latex_preview.py \
-          --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils]} \
-          --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.texlab]}
+          --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils]}
       '';
 
       # Compile FILE into out/ with SyncTeX data for the preview.
@@ -36,7 +33,7 @@
             echo "usage: latex-build FILE.tex" >&2
             exit 2
           fi
-          exec tectonic -X compile "$1" --synctex --keep-logs --outdir out
+          exec tectonic -X compile "$1" --synctex --keep-logs --keep-intermediates --outdir out
         '';
       };
 
@@ -66,6 +63,24 @@
       latex-watch = app "latex-watch";
     });
 
+    # The tests, against src/. tectonic needs the network, so the fixture paper is
+    # built with pdflatex here.
+    checks = forAllSystems (pkgs: {
+      tests =
+        pkgs.runCommand "latex-preview-tests" {
+          nativeBuildInputs = [
+            (pkgs.python3.withPackages (ps: [ps.pytest]))
+            (pkgs.texliveBasic.withPackages (ps: [ps.synctex]))
+            pkgs.poppler-utils
+          ];
+          LATEX_PREVIEW_TEST_ENGINE = "pdflatex";
+        } ''
+          cp -r ${./src} src && cp -r ${./test} test && chmod -R u+w .
+          pytest -q -p no:cacheprovider test
+          touch $out
+        '';
+    });
+
     devShells = forAllSystems (pkgs: {
       default = pkgs.mkShell {
         nativeBuildInputs = with pkgs;
@@ -78,6 +93,17 @@
             watchexec
           ]
           ++ (with self.packages.${pkgs.stdenv.hostPlatform.system}; [latex-preview latex-build latex-watch]);
+      };
+
+      # For working on latex-preview itself: `just test` runs the tests against src/.
+      develop = pkgs.mkShell {
+        nativeBuildInputs = with pkgs; [
+          (python3.withPackages (ps: [ps.pytest]))
+          tectonic
+          (texliveInfraOnly.withPackages (ps: [ps.synctex]))
+          poppler-utils
+          just
+        ];
       };
     });
 

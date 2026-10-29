@@ -256,6 +256,7 @@ events.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === "reload") load();
   else if (msg.type === "forward") highlight(msg.boxes, msg.words);
+  else if (msg.type === "say") say(msg.msg);
 };
 // The server restarted or the tunnel dropped: the PDF may have changed meanwhile.
 events.onopen = () => { if (doc) load(); };
