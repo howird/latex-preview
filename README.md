@@ -6,7 +6,7 @@ your editor.
 Your PDF opens in a browser tab and updates when you pause typing, before you save. Helix starts
 the preview as a language server. Double-click the PDF to jump to that line in Helix, or press a key in Helix to
 scroll the PDF there and highlight the word under your cursor. Either way the PDF highlights the
-text of that source line. It works over SSH: write on a remote machine and read on your laptop.
+text of that source line.
 
 ## Use it in a paper
 
@@ -76,10 +76,9 @@ v = ["hover", ":lsp-workspace-command latex.showInPreview", ":lsp-workspace-comm
 
 ### Port
 
-The preview listens on `127.0.0.1` and a free port. Helix shows the URL, with the `ssh -NL` line to
-run on your laptop, when the server starts; `:lsp-workspace-command latex.previewUrl` shows it
-again. A fixed port saves the lookup and keeps the tunnel and the browser tab working across
-restarts. Set it in `languages.toml`:
+The preview listens on `127.0.0.1` and a free port. Helix shows the URL when the server starts;
+`:lsp-workspace-command latex.previewUrl` shows it again. A fixed port saves the lookup and keeps
+the browser tab working across restarts. Set it in `languages.toml`:
 
 ```toml
 [language-server.latex-preview.config.preview]

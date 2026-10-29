@@ -6,13 +6,12 @@ The preview shows the PDF of one root document (a file with \\documentclass). Op
 file the current root includes keeps that root; a file only another root includes switches to it.
 """
 
-import getpass
 import json
 import os
 import shutil
-import socket
 import sys
 import threading
+import time
 import traceback
 from concurrent.futures import Future, TimeoutError
 from pathlib import Path
@@ -191,16 +190,18 @@ class Server:
             if root is None:
                 continue
             live = self.lives.setdefault(root, Live(root))
+            start = time.monotonic()
             try:
                 errors = live.run(dict(self.docs))
             except Exception as e:
                 traceback.print_exc()
                 errors = [f"latex-preview: build failed: {e}"]
+            ms = round((time.monotonic() - start) * 1000)
             if root != self.root:
                 continue
             self.preview.show_errors(errors)
             if not errors:
-                self.preview.show(live.pdf)
+                self.preview.show(live.pdf, ms)
 
     # Requests from the viewer.
 
@@ -279,10 +280,7 @@ class Server:
     def describe_url(self) -> str:
         if self.url is None:
             return "latex-preview: not listening; see the error when it started"
-        port = self.url.rsplit(":", 1)[1]
-        host = urlparse(self.url).hostname
-        tunnel = f"ssh -NL {port}:{host}:{port} {getpass.getuser()}@{socket.gethostname()}"
-        return f"latex-preview: {self.url} (from your laptop: {tunnel})"
+        return f"latex-preview: serving the preview at {self.url}"
 
     def did_open(self, params: dict[str, Any]) -> None:
         doc = params["textDocument"]

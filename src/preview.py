@@ -2,7 +2,7 @@
 
   GET  /         the viewer
   GET  /pdf      the PDF of the current root
-  GET  /events   server-sent events: reload, forward (boxes to highlight), say (a status line) and
+  GET  /events   server-sent events: reload (with ms, how long the build took, if it was timed), forward (boxes to highlight), say (a status line) and
                  errors (why the last build failed, or none)
   POST /inverse  {page,x,y}: open the source under a double-click in the editor
 """
@@ -49,11 +49,11 @@ class Preview:
             for q in self.clients:
                 q.put(event)
 
-    def show(self, pdf: Path) -> None:
-        """Switch the viewer to another PDF, or reload this one."""
+    def show(self, pdf: Path, ms: int | None = None) -> None:
+        """Switch the viewer to another PDF, or reload this one; ms is how long building it took."""
         self.pdf = pdf
         self.seen = signature(pdf)
-        self.broadcast({"type": "reload"})
+        self.broadcast({"type": "reload"} if ms is None else {"type": "reload", "ms": ms})
 
     def show_errors(self, errors: list[str]) -> None:
         if errors != self.errors:

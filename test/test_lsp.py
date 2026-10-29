@@ -10,7 +10,7 @@ from conftest import Events
 
 
 def url_of(message: dict) -> str:
-    return message["message"].split()[1]
+    return message["message"].split()[-1]
 
 
 def post(url: str, body: dict) -> tuple[int, dict]:
@@ -26,7 +26,7 @@ def test_announces_the_preview_and_serves_the_viewer(client):
     c = client()
     message = c.shown_message()
     assert message["type"] == 3
-    assert "ssh -NL" in message["message"]
+    assert message["message"].startswith("latex-preview: serving the preview at http://127.0.0.1:")
     with urllib.request.urlopen(url_of(message)) as res:
         assert b"pdf.js" in res.read()
     assert c.close() == 0

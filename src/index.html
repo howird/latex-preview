@@ -131,14 +131,20 @@ async function render(focus) {
   else restore(where);
 }
 
-async function load() {
+function duration(ms) {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+// ms is how long the build took, when the server timed it.
+async function load(ms) {
   try {
     const next = await pdfjs.getDocument({ url: `/pdf?t=${Date.now()}` }).promise;
     const old = doc;
     doc = next;
     await render();
     old?.destroy();
-    say(`Updated ${new Date().toLocaleTimeString()}`);
+    const at = new Date().toLocaleTimeString();
+    say(ms == null ? `Built at ${at}` : `Built in ${duration(ms)} at ${at}`);
   } catch (e) {
     say(`Could not load PDF: ${e.message}`);
   }
@@ -262,7 +268,7 @@ window.addEventListener("resize", () => {
 const events = new EventSource("/events");
 events.onmessage = (e) => {
   const msg = JSON.parse(e.data);
-  if (msg.type === "reload") load();
+  if (msg.type === "reload") load(msg.ms);
   else if (msg.type === "forward") highlight(msg.boxes, msg.words);
   else if (msg.type === "say") say(msg.msg);
   else if (msg.type === "errors") {
@@ -270,7 +276,7 @@ events.onmessage = (e) => {
     errors.hidden = msg.errors.length === 0;
   }
 };
-// The server restarted or the tunnel dropped: the PDF may have changed meanwhile.
+// The server restarted or the connection dropped: the PDF may have changed meanwhile.
 events.onopen = () => { if (doc) load(); };
 events.onerror = () => say("Disconnected from preview server, retrying…");
 

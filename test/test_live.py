@@ -1,3 +1,4 @@
+import queue
 import shutil
 import subprocess
 import tempfile
@@ -61,6 +62,16 @@ def test_the_preview_shows_unsaved_text(live, paper):
     # Nothing was written to the paper.
     assert "zebracorn" not in intro.read_text()
     assert "zebracorn" not in text((paper / "out" / "main.pdf").read_bytes())
+
+
+def test_a_build_says_how_long_it_took(live):
+    c, _, events, intro, edited = live
+    # Opening the file switched the preview to it, untimed; skip that and the fixture's builds.
+    with pytest.raises(queue.Empty):
+        while True:
+            events.queue.get(timeout=1)
+    c.change(intro, edited.replace("zebracorn", "unicorn"))
+    assert isinstance(events.next("reload")["ms"], int)
 
 
 def test_an_error_keeps_the_last_pdf_and_says_why(live):
