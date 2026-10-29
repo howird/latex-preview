@@ -1,5 +1,5 @@
 {
-  description = "Live LaTeX PDF preview in your browser, as a language server: updates on save, and clicks jump between the PDF and your editor";
+  description = "Live LaTeX PDF preview in your browser, as a language server: updates as you type, and clicks jump between the PDF and your editor";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -15,13 +15,14 @@
     in rec {
       default = latex-preview;
 
-      # The language server, which serves the viewer; pdftotext finds words for forward search.
+      # The language server, which serves the viewer and builds as you type with tectonic;
+      # pdftotext finds words for forward search.
       latex-preview = pkgs.runCommand "latex-preview" {nativeBuildInputs = [pkgs.makeWrapper];} ''
         mkdir -p $out/share/latex-preview $out/bin
         cp ${./src}/*.py ${./src/index.html} $out/share/latex-preview/
         makeWrapper ${pkgs.python3}/bin/python3 $out/bin/latex-preview \
           --add-flags $out/share/latex-preview/latex_preview.py \
-          --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils]}
+          --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils pkgs.tectonic]}
       '';
 
       # Compile FILE into out/ with SyncTeX data for the preview.

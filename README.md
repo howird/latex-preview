@@ -1,10 +1,10 @@
 # latex-preview
 
-Live LaTeX PDF preview in your browser: updates on save, and clicks jump between the PDF and
+Live LaTeX PDF preview in your browser: updates as you type, and clicks jump between the PDF and
 your editor.
 
-Your PDF opens in a browser tab and reloads whenever you rebuild. Helix starts the preview as a
-language server. Double-click the PDF to jump to that line in Helix, or press a key in Helix to
+Your PDF opens in a browser tab and updates when you pause typing, before you save. Helix starts
+the preview as a language server. Double-click the PDF to jump to that line in Helix, or press a key in Helix to
 scroll the PDF there and highlight the word under your cursor. Either way the PDF highlights the
 text of that source line. It works over SSH: write on a remote machine and read on your laptop.
 
@@ -93,8 +93,7 @@ until you restart the server on a free one.
 
 ## What it shows
 
-The preview shows the PDF of one document, a `.tex` file with `\documentclass`, from
-`out/NAME.pdf` next to it, and reloads whenever it is rebuilt. It finds the document a file
+The preview shows the PDF of one document, a `.tex` file with `\documentclass`. It finds the document a file
 belongs to as texlab does: it reads every `.tex` file in the workspace and follows `\input`,
 `\include`, `\subfile`, `\import` and `\subimport` from each document. Opening or hovering a
 file the current document includes keeps it up. A file only another document includes switches
@@ -106,16 +105,40 @@ relative to the workspace:
 root = "main.tex"
 ```
 
+### As you type
+
+The preview builds the document with tectonic 300 ms after you stop typing, from the text in
+Helix, saved or not, and shows it about half a second later. While the text has an error, the
+last PDF that built stays up under a banner with tectonic's errors. These builds go to a scratch
+directory, so `out/` only ever holds what texlab built from saved files: the PDF to send.
+
+To keep the build fast, it runs TeX once, with the `.aux` and `.bbl` of the build before, so a
+new `\label` or citation shows as `??` until the next build. A paper too slow to build as you
+type can turn it off, and the preview shows `out/NAME.pdf` whenever texlab rebuilds it:
+
+```toml
+[language-server.latex-preview.config.preview]
+onType = false
+```
+
 ## How it works
 
 `src/latex_preview.py` runs `src/lsp.py`, a stdio language server. It finds documents with
-`src/project.py`, and serves `src/index.html`, a PDF.js viewer, from `src/preview.py`.
-`src/locate.py` maps between source lines and the PDF with SyncTeX.
+`src/project.py`, builds them as you type with `src/live.py`, and serves `src/index.html`, a
+PDF.js viewer, from `src/preview.py`. `src/locate.py` maps between source lines and the PDF with
+SyncTeX.
+
+A build as you type works in `$XDG_RUNTIME_DIR/latex-preview/NAME-HASH/`. `src/` mirrors the
+document's directory, with symlinks to the files on disk and the text of the files open in Helix.
+tectonic writes to `build/`, keeping the `.aux` and `.bbl` for the next build, and the PDF and
+SyncTeX file move to `view/` once it succeeds, so the viewer never reads a half-written PDF.
+SyncTeX names files in `src/`, which the server translates to the real ones both ways. Edits made
+during a build are built once it finishes.
 
 | Endpoint | Direction |
 | --- | --- |
 | `POST /inverse {page,x,y}` | PDF → editor: the server sends `window/showDocument` to Helix, and returns the line's boxes to highlight |
-| `GET /events` | Server-sent events: `reload`, `forward` (boxes to highlight) and `say` (a status message) |
+| `GET /events` | Server-sent events: `reload`, `forward` (boxes to highlight), `say` (a status message) and `errors` (why the last build failed) |
 
 Forward search is `latex.showInPreview`: it looks up the position of the last hover.
 
@@ -157,7 +180,8 @@ is ever deleted. It has no effect on the output.
 ## Developing
 
 `nix develop .#develop` has python with pytest, tectonic, synctex, pdftotext and just; `just test`
-runs the tests against `src/`, and `just check` the nix build and its tests.
+runs the tests against `src/`, and `just check` the nix build and its tests. The nix check builds
+with pdflatex, since tectonic downloads its files, so it skips the tests of building as you type.
 
 From a paper repo, point at a local checkout with
 `use flake . --override-input latex-preview path:../latex-preview` in `.envrc`. After a change,

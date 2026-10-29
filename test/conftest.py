@@ -60,7 +60,8 @@ class Client:
             {
                 "rootUri": workspace.as_uri(),
                 "capabilities": {"general": {"positionEncodings": ["utf-32", "utf-16"]}},
-                "initializationOptions": {"preview": settings or {}},
+                # Most tests check the PDF in out/; builds as you type have their own.
+                "initializationOptions": {"preview": {"onType": False, **(settings or {})}},
             },
         )
         self.notify("initialized", {})
@@ -119,6 +120,12 @@ class Client:
             {"textDocument": {"uri": path.as_uri(), "languageId": "latex", "version": 1, "text": path.read_text()}},
         )
 
+    def change(self, path: Path, text: str) -> None:
+        self.notify(
+            "textDocument/didChange",
+            {"textDocument": {"uri": path.as_uri(), "version": 2}, "contentChanges": [{"text": text}]},
+        )
+
     def hover(self, path: Path, line: int, character: int) -> Any:
         return self.request(
             "textDocument/hover",
@@ -158,11 +165,12 @@ class Events:
 
 
 @pytest.fixture
-def client(paper):
+def client(paper, tmp_path):
     clients = []
 
-    def start(workspace: Path = paper, **kwargs) -> Client:
-        c = Client(workspace, **kwargs)
+    def start(workspace: Path = paper, env: dict[str, str] | None = None, **kwargs) -> Client:
+        # Each test's builds get their own scratch directories.
+        c = Client(workspace, env={"XDG_RUNTIME_DIR": str(tmp_path), **(env or {})}, **kwargs)
         clients.append(c)
         return c
 

@@ -1,5 +1,6 @@
 """The language server Helix runs: serves the preview, scrolls it to the last hover on
-`latex.showInPreview`, and opens the source of a double-click in the editor.
+`latex.showInPreview`, and opens the source of a double-click in the editor. With preview.onType,
+it also builds the document as you type, from the editor's text.
 
 The preview shows the PDF of one root document (a file with \\documentclass). Opening or hovering a
 file the current root includes keeps that root; a file only another root includes switches to it.
@@ -8,6 +9,7 @@ file the current root includes keeps that root; a file only another root include
 import getpass
 import json
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
+from live import Live
 from locate import pdf_location, source_at
 from preview import Preview
 from project import Project
@@ -27,6 +30,8 @@ PREVIEW_URL = "latex.previewUrl"
 ERROR, INFO = 1, 3
 # How long a double-click waits for the editor to open the file.
 SHOW_DOCUMENT_TIMEOUT = 5
+# Builds start once typing pauses for this long.
+DEBOUNCE = 0.3
 
 
 def to_path(uri: str) -> Path:
@@ -108,6 +113,12 @@ class Server:
         self.root: Path | None = None
         self.hover: tuple[Path, int, int] | None = None
         self.shutdown = False
+        # Builds as you type: one scratch directory per document, and a build wanted once the
+        # current one is done.
+        self.on_type = False
+        self.lives: dict[Path, Live] = {}
+        self.wanted = threading.Event()
+        self.timer: threading.Timer | None = None
 
     # Messages to the editor.
 
@@ -143,14 +154,61 @@ class Server:
         if root is not None and root != self.root:
             self.root = root
             self.log(f"previewing {root}")
-            self.preview.show(pdf_of(root))
+            self.preview.show(self.pdf_for(root))
+            # The last document's errors don't apply to this one.
+            self.preview.show_errors([])
+            if self.on_type:
+                self.schedule(0)
+
+    # Builds as you type.
+
+    def live(self, root: Path) -> Live | None:
+        """The builds of `root` the preview shows, once one has succeeded."""
+        if not self.on_type:
+            return None
+        live = self.lives.setdefault(root, Live(root))
+        return live if live.pdf.exists() else None
+
+    def pdf_for(self, root: Path) -> Path:
+        live = self.live(root)
+        return live.pdf if live else pdf_of(root)
+
+    def schedule(self, delay: float = DEBOUNCE) -> None:
+        if self.timer:
+            self.timer.cancel()
+        self.timer = threading.Timer(delay, self.wanted.set)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def builder(self) -> None:
+        """Build the current document whenever asked, one build at a time; edits made during a
+        build are built once it finishes.
+        """
+        while True:
+            self.wanted.wait()
+            self.wanted.clear()
+            root = self.root
+            if root is None:
+                continue
+            live = self.lives.setdefault(root, Live(root))
+            try:
+                errors = live.run(dict(self.docs))
+            except Exception as e:
+                traceback.print_exc()
+                errors = [f"latex-preview: build failed: {e}"]
+            if root != self.root:
+                continue
+            self.preview.show_errors(errors)
+            if not errors:
+                self.preview.show(live.pdf)
 
     # Requests from the viewer.
 
     def inverse(self, page: int, x: float, y: float) -> tuple[int, str, list[dict[str, Any]]]:
         if self.root is None:
             return 404, "Open a .tex file in your editor first", []
-        pdf = pdf_of(self.root)
+        live = self.live(self.root)
+        pdf = live.pdf if live else pdf_of(self.root)
         hit = source_at(pdf, page, x, y)
         if hit is None:
             return 404, "No source for that spot", []
@@ -158,10 +216,13 @@ class Server:
         # Show which source line the click resolved to, whether or not the editor gets it.
         span, lines, _ = pdf_location(pdf, src, line)
         boxes = span or lines
+        # A scratch file is a symlink or a copy of the editor's text: name the real one.
+        real = live.to_real(Path(src)) if live else Path(src).resolve()
+        src = str(real)
         start = {"line": line - 1, "character": 0}
         future = self.conn.request(
             "window/showDocument",
-            {"uri": Path(src).resolve().as_uri(), "takeFocus": True, "selection": {"start": start, "end": start}},
+            {"uri": real.as_uri(), "takeFocus": True, "selection": {"start": start, "end": start}},
         )
         try:
             result = future.result(timeout=SHOW_DOCUMENT_TIMEOUT)
@@ -179,6 +240,7 @@ class Server:
         options = params.get("initializationOptions") or {}
         preview = options.get("preview") if isinstance(options, dict) else None
         self.settings = preview if isinstance(preview, dict) else {}
+        self.on_type = self.settings.get("onType", True) is not False
         encodings = params.get("capabilities", {}).get("general", {}).get("positionEncodings", [])
         self.utf32 = "utf-32" in encodings
         workspace = params.get("rootUri")
@@ -206,6 +268,11 @@ class Server:
             self.show_message(ERROR, f"latex-preview: can't listen on {host}:{port}: {e}")
             return
         self.show_message(INFO, self.describe_url())
+        if self.on_type and shutil.which("tectonic") is None:
+            self.on_type = False
+            self.show_message(ERROR, "latex-preview: no tectonic on PATH, so the preview updates on save only")
+        if self.on_type:
+            threading.Thread(target=self.builder, daemon=True).start()
         if self.project is not None:
             self.project.scan()
 
@@ -230,6 +297,8 @@ class Server:
         changes = params["contentChanges"]
         if changes:
             self.docs[path] = changes[-1]["text"]
+        if self.on_type and self.root is not None and path.is_relative_to(self.root.parent):
+            self.schedule()
 
     def did_save(self, params: dict[str, Any]) -> None:
         if self.project is not None and to_path(params["textDocument"]["uri"]).suffix == ".tex":
@@ -270,7 +339,9 @@ class Server:
         if self.hover is None or self.root is None:
             return
         file, line, col = self.hover
-        span, lines, words = pdf_location(pdf_of(self.root), str(file), line, col)
+        live = self.live(self.root)
+        pdf, src = (live.pdf, live.to_scratch(file)) if live else (pdf_of(self.root), file)
+        span, lines, words = pdf_location(pdf, str(src), line, col)
         if not lines:
             name = os.path.relpath(file, self.root.parent)
             return self.say(f"No PDF location for {name}:{line}; is the PDF built from it?")

@@ -69,8 +69,9 @@ def test_an_included_file_shows_its_root(client, paper):
         assert res.read() == (paper / "out" / "main.pdf").read_bytes()
 
 
-def forward(c, events, file, line, word):
-    character = file.read_text().splitlines()[line].index(word)
+def forward(c, events, file, line, word, text=None):
+    """Hover on `word` in the line, as the editor has it, and scroll the preview there."""
+    character = (text or file.read_text()).splitlines()[line].index(word)
     c.hover(file, line, character)
     c.command("latex.showInPreview")
     return events.next("forward")

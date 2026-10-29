@@ -15,6 +15,12 @@
   #bar button { background: #4a4f53; color: #eee; border: 0; border-radius: 4px; padding: 3px 9px; cursor: pointer; }
   #status { margin-left: auto; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #pages { padding: 44px 0 24px; }
+  /* Why the last build failed; the PDF below is the last one that built. */
+  #errors {
+    position: fixed; inset: 32px 0 auto 0; z-index: 2; max-height: 30vh; overflow: auto;
+    margin: 0; padding: 6px 10px; background: #5a1d1d; color: #ffd8d3;
+    font: 12px ui-monospace, monospace; white-space: pre-wrap;
+  }
   .page { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px #0006; }
   .page canvas { display: block; width: 100%; height: 100%; }
   .hl {
@@ -41,6 +47,7 @@
   <button id="fit" title="Fit width (0)">Fit</button>
   <span id="status">Double-click text to jump to it in your editor</span>
 </div>
+<pre id="errors" hidden></pre>
 <div id="pages"></div>
 <script type="module">
 import * as pdfjs from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -49,6 +56,7 @@ pdfjs.GlobalWorkerOptions.workerSrc =
 
 const container = document.getElementById("pages");
 const status = document.getElementById("status");
+const errors = document.getElementById("errors");
 let doc = null;
 let zoom = 1;
 let scale = 1;       // CSS px per PDF point
@@ -257,6 +265,10 @@ events.onmessage = (e) => {
   if (msg.type === "reload") load();
   else if (msg.type === "forward") highlight(msg.boxes, msg.words);
   else if (msg.type === "say") say(msg.msg);
+  else if (msg.type === "errors") {
+    errors.textContent = msg.errors.join("\n");
+    errors.hidden = msg.errors.length === 0;
+  }
 };
 // The server restarted or the tunnel dropped: the PDF may have changed meanwhile.
 events.onopen = () => { if (doc) load(); };
