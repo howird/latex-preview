@@ -19,7 +19,7 @@
       # pdftotext finds words for forward search.
       latex-preview = pkgs.runCommand "latex-preview" {nativeBuildInputs = [pkgs.makeWrapper];} ''
         mkdir -p $out/share/latex-preview $out/bin
-        cp ${./src}/*.py ${./src/index.html} $out/share/latex-preview/
+        cp ${./src}/*.py ${./src}/index.html $out/share/latex-preview/
         makeWrapper ${pkgs.python3}/bin/python3 $out/bin/latex-preview \
           --add-flags $out/share/latex-preview/latex_preview.py \
           --prefix PATH : ${pkgs.lib.makeBinPath [synctex pkgs.poppler-utils pkgs.tectonic]}
@@ -64,7 +64,7 @@
       latex-watch = app "latex-watch";
     });
 
-    # The tests, against src/. tectonic needs the network, so the fixture paper is
+    # The tests, against the packaged server. tectonic needs the network, so the fixture paper is
     # built with pdflatex here.
     checks = forAllSystems (pkgs: {
       tests =
@@ -75,6 +75,7 @@
             pkgs.poppler-utils
           ];
           LATEX_PREVIEW_TEST_ENGINE = "pdflatex";
+          LATEX_PREVIEW_TEST_SERVER = "${self.packages.${pkgs.stdenv.hostPlatform.system}.latex-preview}/bin/latex-preview";
         } ''
           cp -r ${./src} src && cp -r ${./test} test && chmod -R u+w .
           pytest -q -p no:cacheprovider test

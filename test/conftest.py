@@ -19,6 +19,8 @@ sys.path.insert(0, str(ROOT / "src"))
 FIXTURE = Path(__file__).parent / "fixtures" / "paper"
 # tectonic needs the network on its first run; the nix check builds with pdflatex instead.
 ENGINE = os.environ.get("LATEX_PREVIEW_TEST_ENGINE", "tectonic")
+# The server to test: src/, or the nix check's packaged one.
+SERVER = os.environ.get("LATEX_PREVIEW_TEST_SERVER")
 
 
 def build(paper: Path) -> None:
@@ -43,7 +45,7 @@ def paper(tmp_path_factory) -> Path:
 class Client:
     def __init__(self, workspace: Path, env: dict[str, str] | None = None, settings: dict[str, Any] | None = None):
         self.proc = subprocess.Popen(
-            [sys.executable, str(ROOT / "src" / "latex_preview.py")],
+            [SERVER] if SERVER else [sys.executable, str(ROOT / "src" / "latex_preview.py")],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             env={**os.environ, "LATEX_PREVIEW_PORT": "0", **(env or {})},
